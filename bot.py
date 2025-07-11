@@ -1,22 +1,21 @@
 import os
 import json
 import logging
-from datetime import datetime
-from zoneinfo import ZoneInfo  # Python 3.9+
+import asyncio
 
+from datetime import datetime
 from telegram import InputFile, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-import asyncio
+from zoneinfo import ZoneInfo  # Python 3.9+
 
 TOKEN = os.getenv("BOT_TOKEN")
 PHOTOS_FOLDER = "photos"
 USERS_FILE = "users.json"
 SENT_FILE = "sent.json"
 
-scheduler = AsyncIOScheduler()
+scheduler = BackgroundScheduler()
 logging.basicConfig(level=logging.INFO)
 
 def load_json(filename, default):
@@ -35,11 +34,11 @@ sent = load_json(SENT_FILE, {})
 def get_photo_list():
     return sorted(f for f in os.listdir(PHOTOS_FOLDER) if not f.lower().startswith("start"))
 
+# Función async que envía la foto (sin cambios)
 async def send_photo_to_user(app, user_id):
     logging.info(f"Enviando foto al usuario {user_id} en {datetime.now()}")
     photo_list = get_photo_list()
     user_sent = sent.get(str(user_id), [])
-
     available = [p for p in photo_list if p not in user_sent]
 
     if not available:
@@ -54,20 +53,29 @@ async def send_photo_to_user(app, user_id):
             sent[str(user_id)] = user_sent
             save_json(SENT_FILE, sent)
         except Exception as e:
-            logging.error(f"Error sending to {user_id}: {e}")
+            print(f"Error sending to {user_id}: {e}")
+
+# Aquí viene el wrapper sincronico para BackgroundScheduler
+def send_photo_to_user_sync(app, user_id):
+    # Obtenemos el event loop de la aplicación Telegram
+    loop = asyncio.get_event_loop()
+    # Mandamos la coroutine al event loop para que se ejecute en su contexto
+    asyncio.run_coroutine_threadsafe(send_photo_to_user(app, user_id), loop)
 
 def schedule_user_job(app, user_id, time_str):
     hour, minute = map(int, time_str.split(":"))
     user_tz = ZoneInfo("America/Argentina/Buenos_Aires")
     trigger = CronTrigger(hour=hour, minute=minute, timezone=user_tz)
-    scheduler.add_job(send_photo_to_user, trigger, args=[app, user_id], id=str(user_id), replace_existing=True)
+    # Usamos la versión sync para que BackgroundScheduler la pueda ejecutar sin warnings
+    scheduler.add_job(send_photo_to_user_sync, trigger, args=[app, user_id], id=str(user_id), replace_existing=True)
+
+# --- Handlers async (sin cambios) ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     if user_id not in users:
         users[user_id] = {"time": "10:00"}
         save_json(USERS_FILE, users)
-
     schedule_user_job(context.application, user_id, users[user_id]["time"])
 
     found = False
@@ -81,8 +89,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
             except Exception as e:
                 await update.message.reply_text(f"Failed to send start image: {e}")
-                logging.error(f"Error sending start image: {e}")
-
+                print(f"Error sending start image: {e}")
     if not found:
         await update.message.reply_text("No start image found.")
 
@@ -91,7 +98,6 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Usage: /time HH:MM (24h format)")
         return
-
     time_str = context.args[0]
     try:
         datetime.strptime(time_str, "%H:%M")
@@ -102,20 +108,23 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Invalid time format. Use HH:MM in 24-hour format.")
 
-def main():
+def run_bot():
     app = Application.builder().token(TOKEN).build()
+    app.add_error_handler(lambda update, context: print(context.error))
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("time", set_time))
 
-    # Programar jobs para usuarios existentes
+    # Iniciar scheduler solo UNA vez (antes de run_polling)
+    scheduler.start()
+
+    # Agregar jobs para usuarios ya existentes
     for uid, data in users.items():
         schedule_user_job(app, uid, data["time"])
 
-    scheduler.start()
+    print("Contenido de photos:", os.listdir(PHOTOS_FOLDER))
 
-    # run_polling maneja el loop de asyncio internamente, no usar asyncio.run()
     app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    run_bot()
