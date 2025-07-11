@@ -62,12 +62,11 @@ def send_photo_to_user_sync(app, user_id):
     # Mandamos la coroutine al event loop para que se ejecute en su contexto
     asyncio.run_coroutine_threadsafe(send_photo_to_user(app, user_id), loop)
 
-def schedule_user_job(app, user_id, time_str):
+def schedule_user_job(app, user_id, time_str, loop):
     hour, minute = map(int, time_str.split(":"))
     user_tz = ZoneInfo("America/Argentina/Buenos_Aires")
     trigger = CronTrigger(hour=hour, minute=minute, timezone=user_tz)
-    # Usamos la versión sync para que BackgroundScheduler la pueda ejecutar sin warnings
-    scheduler.add_job(send_photo_to_user_sync, trigger, args=[app, user_id], id=str(user_id), replace_existing=True)
+    scheduler.add_job(send_photo_to_user_sync, trigger, args=[app, user_id, loop], id=str(user_id), replace_existing=True)
 
 # --- Handlers async (sin cambios) ---
 
@@ -110,21 +109,19 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def run_bot():
     app = Application.builder().token(TOKEN).build()
-    app.add_error_handler(lambda update, context: print(context.error))
+
+    main_loop = asyncio.get_event_loop()
+
+    scheduler.start()
+
+    for uid, data in users.items():
+        schedule_user_job(app, uid, data["time"], main_loop)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("time", set_time))
 
-    # Iniciar scheduler solo UNA vez (antes de run_polling)
-    scheduler.start()
-
-    # Agregar jobs para usuarios ya existentes
-    for uid, data in users.items():
-        schedule_user_job(app, uid, data["time"])
-
-    print("Contenido de photos:", os.listdir(PHOTOS_FOLDER))
-
     app.run_polling()
+
 
 if __name__ == "__main__":
     run_bot()
