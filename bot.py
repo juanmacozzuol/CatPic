@@ -1,14 +1,14 @@
 import os
 import json
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo  # Python 3.9+
 
-from datetime import datetime, time
 from telegram import InputFile, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from zoneinfo import ZoneInfo  # Python 3.9+
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 import asyncio
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -30,12 +30,11 @@ def save_json(filename, data):
         json.dump(data, f)
 
 users = load_json(USERS_FILE, {})
-sent = load_json(SENT_FILE, {})  # Now tracking per user
+sent = load_json(SENT_FILE, {})
 
 def get_photo_list():
     return sorted(f for f in os.listdir(PHOTOS_FOLDER) if not f.lower().startswith("start"))
 
-# --- Send Daily Photo to One User ---
 async def send_photo_to_user(app, user_id):
     logging.info(f"Enviando foto al usuario {user_id} en {datetime.now()}")
     photo_list = get_photo_list()
@@ -55,27 +54,20 @@ async def send_photo_to_user(app, user_id):
             sent[str(user_id)] = user_sent
             save_json(SENT_FILE, sent)
         except Exception as e:
-            print(f"Error sending to {user_id}: {e}")
+            logging.error(f"Error sending to {user_id}: {e}")
 
 def schedule_user_job(app, user_id, time_str):
     hour, minute = map(int, time_str.split(":"))
     user_tz = ZoneInfo("America/Argentina/Buenos_Aires")
     trigger = CronTrigger(hour=hour, minute=minute, timezone=user_tz)
-
-    # Programá la función asíncrona directamente
     scheduler.add_job(send_photo_to_user, trigger, args=[app, user_id], id=str(user_id), replace_existing=True)
-
-# --- /start ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
-
-    # Save user with default time
     if user_id not in users:
         users[user_id] = {"time": "10:00"}
         save_json(USERS_FILE, users)
 
-    # Schedule photo job for this user
     schedule_user_job(context.application, user_id, users[user_id]["time"])
 
     found = False
@@ -84,18 +76,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if os.path.exists(start_path):
             try:
                 with open(start_path, "rb") as f:
-                    await update.message.reply_photo(photo=InputFile(f), caption="¡Bienvenido al Cat Pic of the Day! Aquí tienes una imagen de inicio.")
-
+                    await update.message.reply_photo(photo=InputFile(f), caption="¡Bienvenido al Cat Pic of the Day!")
                 found = True
                 break
             except Exception as e:
                 await update.message.reply_text(f"Failed to send start image: {e}")
-                print(f"Error sending start image: {e}")
+                logging.error(f"Error sending start image: {e}")
 
     if not found:
         await update.message.reply_text("No start image found.")
 
-# --- /time HH:MM ---
 async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     if not context.args:
@@ -112,23 +102,20 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Invalid time format. Use HH:MM in 24-hour format.")
 
-# --- Main ---
-
-def run_bot():
+async def main():
     app = Application.builder().token(TOKEN).build()
-    app.add_error_handler(lambda update, context: print(context.error))
+    app.add_error_handler(lambda update, context: logging.error(context.error))
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("time", set_time))
-    print("Contenido de photos:", os.listdir(PHOTOS_FOLDER))
-    scheduler.start()
 
-    # Schedule jobs for existing users
+    # Programar jobs para usuarios existentes
     for uid, data in users.items():
         schedule_user_job(app, uid, data["time"])
-    
+
     scheduler.start()
-    app.run_polling()
+
+    await app.run_polling()
 
 if __name__ == "__main__":
-    run_bot()
+    asyncio.run(main())
