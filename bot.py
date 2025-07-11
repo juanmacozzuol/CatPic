@@ -102,9 +102,8 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Invalid time format. Use HH:MM in 24-hour format.")
 
-async def main():
+def main():
     app = Application.builder().token(TOKEN).build()
-    app.add_error_handler(lambda update, context: logging.error(context.error))
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("time", set_time))
@@ -115,7 +114,8 @@ async def main():
 
     scheduler.start()
 
-    await app.run_polling()
+    # run_polling maneja el loop de asyncio internamente, no usar asyncio.run()
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
