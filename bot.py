@@ -7,6 +7,7 @@ from telegram import InputFile, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from zoneinfo import ZoneInfo  # Python 3.9+
 
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -56,7 +57,8 @@ async def send_photo_to_user(app, user_id):
 
 def schedule_user_job(app, user_id, time_str):
     hour, minute = map(int, time_str.split(":"))
-    trigger = CronTrigger(hour=hour, minute=minute)
+    user_tz = ZoneInfo("America/Argentina/Buenos_Aires")
+    trigger = CronTrigger(hour=hour, minute=minute, timezone=user_tz)
     scheduler.add_job(send_photo_to_user, trigger, args=[app, user_id], id=str(user_id), replace_existing=True)
 
 # --- /start ---
