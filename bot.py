@@ -66,6 +66,7 @@ def schedule_user_job(app, user_id, time_str, loop):
     hour, minute = map(int, time_str.split(":"))
     user_tz = ZoneInfo("America/Argentina/Buenos_Aires")
     trigger = CronTrigger(hour=hour, minute=minute, timezone=user_tz)
+
     scheduler.add_job(send_photo_to_user_sync, trigger, args=[app, user_id, loop], id=str(user_id), replace_existing=True)
 
 # --- Handlers async (sin cambios) ---
@@ -75,7 +76,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in users:
         users[user_id] = {"time": "10:00"}
         save_json(USERS_FILE, users)
-    schedule_user_job(context.application, user_id, users[user_id]["time"])
+    loop = asyncio.get_event_loop()
+    schedule_user_job(context.application, user_id, users[user_id]["time"], loop)
 
     found = False
     for ext in ("jpg", "jpeg", "png", "webp"):
@@ -102,7 +104,8 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
         datetime.strptime(time_str, "%H:%M")
         users[user_id] = {"time": time_str}
         save_json(USERS_FILE, users)
-        schedule_user_job(context.application, user_id, time_str)
+        loop = asyncio.get_event_loop()
+        schedule_user_job(context.application, user_id, time_str, loop)
         await update.message.reply_text(f"Time updated! You'll now receive photos at {time_str}.")
     except ValueError:
         await update.message.reply_text("Invalid time format. Use HH:MM in 24-hour format.")
