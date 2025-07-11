@@ -8,14 +8,15 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from zoneinfo import ZoneInfo  # Python 3.9+
-
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import asyncio
 
 TOKEN = os.getenv("BOT_TOKEN")
 PHOTOS_FOLDER = "photos"
 USERS_FILE = "users.json"
 SENT_FILE = "sent.json"
 
-scheduler = BackgroundScheduler()
+scheduler = AsyncIOScheduler()
 logging.basicConfig(level=logging.INFO)
 
 def load_json(filename, default):
@@ -60,6 +61,8 @@ def schedule_user_job(app, user_id, time_str):
     hour, minute = map(int, time_str.split(":"))
     user_tz = ZoneInfo("America/Argentina/Buenos_Aires")
     trigger = CronTrigger(hour=hour, minute=minute, timezone=user_tz)
+
+    # Programá la función asíncrona directamente
     scheduler.add_job(send_photo_to_user, trigger, args=[app, user_id], id=str(user_id), replace_existing=True)
 
 # --- /start ---
@@ -123,7 +126,8 @@ def run_bot():
     # Schedule jobs for existing users
     for uid, data in users.items():
         schedule_user_job(app, uid, data["time"])
-
+    
+    scheduler.start()
     app.run_polling()
 
 if __name__ == "__main__":
