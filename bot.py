@@ -8,7 +8,7 @@ from telegram import InputFile, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from zoneinfo import ZoneInfo  # Python 3.9+
+from zoneinfo import ZoneInfo
 
 TOKEN = os.getenv("BOT_TOKEN")
 PHOTOS_FOLDER = "photos"
@@ -34,7 +34,7 @@ sent = load_json(SENT_FILE, {})
 def get_photo_list():
     return sorted(f for f in os.listdir(PHOTOS_FOLDER) if not f.lower().startswith("start"))
 
-# Función async que envía la foto (sin cambios)
+# --- Envío asíncrono real ---
 async def send_photo_to_user(app, user_id):
     logging.info(f"Enviando foto al usuario {user_id} en {datetime.now()}")
     photo_list = get_photo_list()
@@ -55,13 +55,11 @@ async def send_photo_to_user(app, user_id):
         except Exception as e:
             print(f"Error sending to {user_id}: {e}")
 
-# Aquí viene el wrapper sincronico para BackgroundScheduler
+# --- Versión sincrónica para APScheduler ---
 def send_photo_to_user_sync(app, user_id, loop):
-    # Obtenemos el event loop de la aplicación Telegram
-    loop = asyncio.get_event_loop()
-    # Mandamos la coroutine al event loop para que se ejecute en su contexto
     asyncio.run_coroutine_threadsafe(send_photo_to_user(app, user_id), loop)
 
+# --- Programar tareas ---
 def schedule_user_job(app, user_id, time_str, loop):
     hour, minute = map(int, time_str.split(":"))
     user_tz = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -69,36 +67,33 @@ def schedule_user_job(app, user_id, time_str, loop):
 
     scheduler.add_job(send_photo_to_user_sync, trigger, args=[app, user_id, loop], id=str(user_id), replace_existing=True)
 
-# --- Handlers async (sin cambios) ---
-
+# --- Comandos ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     if user_id not in users:
         users[user_id] = {"time": "10:00"}
         save_json(USERS_FILE, users)
+
     loop = asyncio.get_event_loop()
     schedule_user_job(context.application, user_id, users[user_id]["time"], loop)
 
-    found = False
     for ext in ("jpg", "jpeg", "png", "webp"):
         start_path = os.path.join(PHOTOS_FOLDER, f"start.{ext}")
         if os.path.exists(start_path):
             try:
                 with open(start_path, "rb") as f:
                     await update.message.reply_photo(photo=InputFile(f), caption="¡Bienvenido al Cat Pic of the Day!")
-                found = True
-                break
+                return
             except Exception as e:
-                await update.message.reply_text(f"Failed to send start image: {e}")
-                print(f"Error sending start image: {e}")
-    if not found:
-        await update.message.reply_text("No start image found.")
+                await update.message.reply_text(f"Error al enviar la imagen de inicio: {e}")
+    await update.message.reply_text("No se encontró imagen de inicio.")
 
 async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     if not context.args:
-        await update.message.reply_text("Usage: /time HH:MM (24h format)")
+        await update.message.reply_text("Uso: /time HH:MM (formato 24h)")
         return
+
     time_str = context.args[0]
     try:
         datetime.strptime(time_str, "%H:%M")
@@ -106,13 +101,13 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_json(USERS_FILE, users)
         loop = asyncio.get_event_loop()
         schedule_user_job(context.application, user_id, time_str, loop)
-        await update.message.reply_text(f"Time updated! You'll now receive photos at {time_str}.")
+        await update.message.reply_text(f"¡Hora actualizada! Recibirás fotos a las {time_str}.")
     except ValueError:
-        await update.message.reply_text("Invalid time format. Use HH:MM in 24-hour format.")
+        await update.message.reply_text("Formato inválido. Usa HH:MM en formato 24 horas.")
 
+# --- Arranque principal ---
 def run_bot():
     app = Application.builder().token(TOKEN).build()
-
     main_loop = asyncio.get_event_loop()
 
     scheduler.start()
@@ -124,7 +119,6 @@ def run_bot():
     app.add_handler(CommandHandler("time", set_time))
 
     app.run_polling()
-
 
 if __name__ == "__main__":
     run_bot()
