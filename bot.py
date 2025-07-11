@@ -36,6 +36,7 @@ def get_photo_list():
 
 # --- Send Daily Photo to One User ---
 async def send_photo_to_user(app, user_id):
+    logging.info(f"Enviando foto al usuario {user_id} en {datetime.now()}")
     photo_list = get_photo_list()
     user_sent = sent.get(str(user_id), [])
 
