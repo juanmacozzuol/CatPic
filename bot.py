@@ -56,7 +56,7 @@ async def send_photo_to_user(app, user_id):
             print(f"Error sending to {user_id}: {e}")
 
 # Aquí viene el wrapper sincronico para BackgroundScheduler
-def send_photo_to_user_sync(app, user_id):
+def send_photo_to_user_sync(app, user_id, loop):
     # Obtenemos el event loop de la aplicación Telegram
     loop = asyncio.get_event_loop()
     # Mandamos la coroutine al event loop para que se ejecute en su contexto
