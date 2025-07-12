@@ -48,7 +48,9 @@ async def send_photo_to_user(app, user_id):
     if available:
         photo = available[0]
         try:
-            await app.bot.send_photo(chat_id=user_id, photo=InputFile(os.path.join(PHOTOS_FOLDER, photo)))
+            photo_path = os.path.join(PHOTOS_FOLDER, photo)
+            with open(photo_path, "rb") as f:
+                await app.bot.send_photo(chat_id=user_id, photo=InputFile(f))
             user_sent.append(photo)
             sent[str(user_id)] = user_sent
             save_json(SENT_FILE, sent)
